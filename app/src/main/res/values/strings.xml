@@ -6,4 +6,14 @@
     <string name="hint_message">메시지를 입력하세요…</string>
     <string name="btn_send">전송</string>
     <string name="btn_cancel">취소</string>
+    <string name="toast_cancelling">요청 취소 중...</string>
+    <string name="status_waiting">대기 중 (남은 요청: %d)</string>
+    <string name="status_waiting_queue">대기 중... (앞에 %d개 요청)</string>
+    <string name="status_processing">처리 중...</string>
+    <string name="status_completed">처리 완료</string>
+    <string name="status_cancelled">취소됨</string>
+    <string name="status_error">오류: %s</string>
+    <string name="msg_cancelled">[취소됨]</string>
+    <string name="msg_error">[오류: %s]</string>
+    <string name="status_service_not_connected">Service not connected</string>
 </resources>

@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnSend.setOnClickListener { sendMessage() }
         binding.btnCancel.setOnClickListener {
             viewModel.cancelLastRequest()
-            Toast.makeText(this, "요청 취소 중...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.toast_cancelling, Toast.LENGTH_SHORT).show()
         }
         binding.etInput.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_SEND ||

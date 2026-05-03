@@ -61,7 +61,7 @@ class LlmForegroundService : Service() {
         try {
             inferenceEngine.initialize()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialise inference engine", e)
+            Log.e(TAG, "Failed to initialize inference engine", e)
         }
         queueManager = LlmQueueManager(inferenceEngine)
         startForeground(NOTIFICATION_ID, buildNotification())

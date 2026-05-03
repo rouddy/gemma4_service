@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import com.example.gemma4service.R
 import com.example.gemma4service.ILlmCallback
 import com.example.gemma4service.ILlmService
 import com.example.gemma4service.model.LlmState
@@ -87,7 +88,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         val service = llmService ?: run {
-            _statusText.value = "Service not connected"
+            _statusText.value = getApplication<Application>().getString(R.string.status_service_not_connected)
             return
         }
 
@@ -135,20 +136,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun handleLlmState(state: LlmState) {
+        val res = getApplication<Application>().resources
         when (state) {
             is LlmState.Waiting -> {
                 val msgId = requestToMessageId[state.requestId] ?: return
                 updateMessage(msgId) { msg ->
-                    msg.copy(text = "대기 중... (앞에 ${state.queuePosition}개 요청)", isStreaming = true)
+                    msg.copy(
+                        text = res.getString(R.string.status_waiting_queue, state.queuePosition),
+                        isStreaming = true
+                    )
                 }
-                _statusText.value = "대기 중 (남은 요청: ${state.queuePosition})"
+                _statusText.value = res.getString(R.string.status_waiting, state.queuePosition)
             }
             is LlmState.Processing -> {
                 val msgId = requestToMessageId[state.requestId] ?: return
                 updateMessage(msgId) { msg ->
                     msg.copy(text = state.partialText, isStreaming = true)
                 }
-                _statusText.value = "처리 중..."
+                _statusText.value = res.getString(R.string.status_processing)
             }
             is LlmState.Completed -> {
                 val msgId = requestToMessageId[state.requestId] ?: return
@@ -156,16 +161,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     msg.copy(text = state.fullText, isStreaming = false)
                 }
                 requestToMessageId.remove(state.requestId)
-                _statusText.value = "처리 완료"
+                _statusText.value = res.getString(R.string.status_completed)
             }
             is LlmState.Error -> {
                 val msgId = requestToMessageId[state.requestId] ?: return
-                val displayText = if (state.reason == "cancelled") "[취소됨]" else "[오류: ${state.reason}]"
+                val displayText = if (state.reason == "cancelled") {
+                    res.getString(R.string.msg_cancelled)
+                } else {
+                    res.getString(R.string.msg_error, state.reason)
+                }
                 updateMessage(msgId) { msg ->
                     msg.copy(text = displayText, isStreaming = false)
                 }
                 requestToMessageId.remove(state.requestId)
-                _statusText.value = if (state.reason == "cancelled") "취소됨" else "오류: ${state.reason}"
+                _statusText.value = if (state.reason == "cancelled") {
+                    res.getString(R.string.status_cancelled)
+                } else {
+                    res.getString(R.string.status_error, state.reason)
+                }
             }
         }
     }
