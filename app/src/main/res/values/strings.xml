@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gemma4 Service</string>
+    <string name="service_notification_title">Gemma4 LLM Service</string>
+    <string name="service_notification_text">LLM inference engine is running</string>
+    <string name="hint_message">메시지를 입력하세요…</string>
+    <string name="btn_send">전송</string>
+    <string name="btn_cancel">취소</string>
+</resources>
