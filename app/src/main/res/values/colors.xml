@@ -7,4 +7,11 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <color name="bubble_user_bg">#FF6200EE</color>
+    <color name="bubble_user_text">#FFFFFFFF</color>
+    <color name="bubble_ai_bg">#FFE0E0E0</color>
+    <color name="bubble_ai_text">#FF000000</color>
+    <color name="status_bg">#FFF5F5F5</color>
+    <color name="status_text">#FF757575</color>
 </resources>
