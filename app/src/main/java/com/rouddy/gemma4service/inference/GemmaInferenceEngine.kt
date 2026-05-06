@@ -84,7 +84,9 @@ class GemmaInferenceEngine(private val context: Context) {
                         input.copyTo(output)
                     }
                 }
-                tmp.renameTo(file)
+                tmp.renameTo(file).also { success ->
+                    if (!success) throw Exception("Failed to rename downloaded model file")
+                }
             } catch (e: Exception) {
                 tmp.delete()
                 throw e
