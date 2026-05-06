@@ -6,7 +6,7 @@ import com.google.ai.edge.litertlm.*
 import io.reactivex.rxjava3.core.Observable
 import kotlinx.coroutines.rx3.asObservable
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Wraps the MediaPipe LLM Inference API for the Gemma 4 4BE model.
@@ -31,7 +31,8 @@ class GemmaInferenceEngine(private val context: Context) {
     }
 
     private lateinit var engine: Engine
-    private val isCancelled = AtomicBoolean(false)
+    /** Holds the [Conversation] that is currently streaming a response, or null when idle. */
+    private val activeConversation = AtomicReference<Conversation?>(null)
 
     /**
      * Initialises the LlmInference engine.  Must be called once before [generate].
@@ -75,10 +76,11 @@ class GemmaInferenceEngine(private val context: Context) {
      * The conversation's context (previous turns) is preserved by the engine.
      */
     fun sendMessage(conversation: Conversation, prompt: String): Observable<String> {
-        isCancelled.set(false)
+        activeConversation.set(conversation)
         return conversation.sendMessageAsync(prompt).asObservable()
             .map { message -> message.contents.contents.joinToString(" ") { it.toString() } }
             .startWithItem("").scan { acc, token -> acc + token }
+            .doFinally { activeConversation.set(null) }
     }
 
     /**
@@ -93,10 +95,9 @@ class GemmaInferenceEngine(private val context: Context) {
         }
     }
 
-    /** Signals the ongoing generation to stop early. */
+    /** Signals the ongoing generation to stop early by cancelling the active conversation. */
     fun cancelGeneration() {
-        isCancelled.set(true)
-//        llmInference?.cancel()
+        activeConversation.getAndSet(null)?.cancelProcess()
     }
 
     /** Releases native resources. */
