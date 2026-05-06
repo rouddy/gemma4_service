@@ -6,7 +6,7 @@ import com.google.ai.edge.litertlm.*
 import io.reactivex.rxjava3.core.Observable
 import kotlinx.coroutines.rx3.asObservable
 import java.io.File
-import java.util.concurrent.atomic.AtomicReference
+import java.util.Collections
 
 /**
  * Wraps the MediaPipe LLM Inference API for the Gemma 4 4BE model.
@@ -31,8 +31,9 @@ class GemmaInferenceEngine(private val context: Context) {
     }
 
     private lateinit var engine: Engine
-    /** Holds the [Conversation] that is currently streaming a response, or null when idle. */
-    private val activeConversation = AtomicReference<Conversation?>(null)
+    /** Set of [Conversation]s that are currently streaming a response. */
+    private val activeConversations: MutableSet<Conversation> =
+        Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
     /**
      * Initialises the LlmInference engine.  Must be called once before [generate].
@@ -76,11 +77,11 @@ class GemmaInferenceEngine(private val context: Context) {
      * The conversation's context (previous turns) is preserved by the engine.
      */
     fun sendMessage(conversation: Conversation, prompt: String): Observable<String> {
-        activeConversation.set(conversation)
+        activeConversations.add(conversation)
         return conversation.sendMessageAsync(prompt).asObservable()
             .map { message -> message.contents.contents.joinToString(" ") { it.toString() } }
             .startWithItem("").scan { acc, token -> acc + token }
-            .doFinally { activeConversation.set(null) }
+            .doFinally { activeConversations.remove(conversation) }
     }
 
     /**
@@ -95,9 +96,18 @@ class GemmaInferenceEngine(private val context: Context) {
         }
     }
 
-    /** Signals the ongoing generation to stop early by cancelling the active conversation. */
-    fun cancelGeneration() {
-        activeConversation.getAndSet(null)?.cancelProcess()
+    /** Signals the given [conversation]'s ongoing generation to stop early. */
+    fun cancelGeneration(conversation: Conversation) {
+        if (activeConversations.remove(conversation)) {
+            conversation.cancelProcess()
+        }
+    }
+
+    /** Cancels all ongoing generations (e.g. on service shutdown). */
+    fun cancelAllGenerations() {
+        val snapshot = activeConversations.toList()
+        activeConversations.clear()
+        snapshot.forEach { it.cancelProcess() }
     }
 
     /** Releases native resources. */
