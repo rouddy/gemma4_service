@@ -47,17 +47,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var llmService: ILlmService? = null
     private var isBound = false
 
+    // Active conversation ID obtained from the service (-1 = not yet created)
+    private var conversationId: Int = -1
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             llmService = ILlmService.Stub.asInterface(binder)
             isBound = true
             Log.d(TAG, "Service connected")
             _statusText.postValue("Service connected")
+            conversationId = llmService?.createConversation() ?: -1
+            Log.d(TAG, "Created conversation: $conversationId")
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             llmService = null
             isBound = false
+            conversationId = -1
             Log.d(TAG, "Service disconnected")
             _statusText.postValue("Service disconnected")
         }
@@ -89,6 +95,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         val service = llmService ?: run {
+            _statusText.value = getApplication<Application>().getString(R.string.status_service_not_connected)
+            return
+        }
+        if (conversationId == -1) {
             _statusText.value = getApplication<Application>().getString(R.string.status_service_not_connected)
             return
         }
@@ -127,7 +137,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        service.submitRequest(requestId, text, callback)
+        service.sendMessage(conversationId, requestId, text, callback)
     }
 
     fun cancelLastRequest() {
@@ -198,6 +208,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         compositeDisposable.dispose()
         if (isBound) {
+            if (conversationId != -1) {
+                llmService?.closeConversation(conversationId)
+                conversationId = -1
+            }
             getApplication<Application>().unbindService(serviceConnection)
             isBound = false
         }

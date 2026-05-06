@@ -8,11 +8,13 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.google.ai.edge.litertlm.Conversation
 import com.rouddy.gemma4service.ILlmCallback
 import com.rouddy.gemma4service.ILlmService
 import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.inference.GemmaInferenceEngine
 import com.rouddy.gemma4service.model.LlmRequest
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Foreground service that hosts the Gemma 4 LLM inference engine.
@@ -31,18 +33,49 @@ class LlmForegroundService : Service() {
     private lateinit var inferenceEngine: GemmaInferenceEngine
     private lateinit var queueManager: LlmQueueManager
 
+    /** Active conversations keyed by their hashCode (the conversationId exposed to clients). */
+    private val conversations = ConcurrentHashMap<Int, Conversation>()
+
     // ---- AIDL stub implementation ----
     private val binder = object : ILlmService.Stub() {
 
-        override fun submitRequest(
+        override fun createConversation(): Int {
+            return try {
+                val conversation = inferenceEngine.createConversation()
+                val id = conversation.hashCode()
+                conversations[id] = conversation
+                Log.d(TAG, "createConversation: id=$id")
+                id
+            } catch (e: Exception) {
+                Log.e(TAG, "createConversation failed", e)
+                -1
+            }
+        }
+
+        override fun sendMessage(
+            conversationId: Int,
             requestId: String,
-            prompt: String,
+            message: String,
             callback: ILlmCallback
         ): Boolean {
-            if (requestId.isBlank() || prompt.isBlank()) return false
-            Log.d(TAG, "submitRequest: $requestId")
-            val request = LlmRequest(requestId, prompt, callback)
+            if (requestId.isBlank() || message.isBlank()) return false
+            val conversation = conversations[conversationId] ?: run {
+                Log.w(TAG, "sendMessage: unknown conversationId=$conversationId")
+                return false
+            }
+            Log.d(TAG, "sendMessage: conversationId=$conversationId requestId=$requestId")
+            val request = LlmRequest(requestId, message, callback, conversation)
             queueManager.enqueue(request)
+            return true
+        }
+
+        override fun closeConversation(conversationId: Int): Boolean {
+            val conversation = conversations.remove(conversationId) ?: run {
+                Log.w(TAG, "closeConversation: unknown conversationId=$conversationId")
+                return false
+            }
+            Log.d(TAG, "closeConversation: id=$conversationId")
+            inferenceEngine.closeConversation(conversation)
             return true
         }
 
@@ -76,6 +109,8 @@ class LlmForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         queueManager.shutdown()
+        conversations.values.forEach { inferenceEngine.closeConversation(it) }
+        conversations.clear()
         inferenceEngine.close()
         Log.i(TAG, "Service destroyed")
     }

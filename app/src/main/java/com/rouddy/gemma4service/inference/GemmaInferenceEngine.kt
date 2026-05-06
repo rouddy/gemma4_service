@@ -59,18 +59,38 @@ class GemmaInferenceEngine(private val context: Context) {
     }
 
     /**
-     * Generates a response for [prompt] and emits partial tokens as [Observable] strings.
-     * Completes when the model finishes or [cancelGeneration] is called.
+     * Creates a new [Conversation] that preserves context across multiple [sendMessage] calls.
+     * Throws if the engine has not been initialised.
      */
-    fun generate(prompt: String): Observable<String> {
-        isCancelled.set(false)
+    fun createConversation(): Conversation {
         if (!engine.isInitialized()) {
-            return Observable.error(IllegalStateException("GemmaInferenceEngine must be initialized before generating"))
+            throw IllegalStateException("GemmaInferenceEngine must be initialized before creating a conversation")
         }
-        return engine.createConversation().sendMessageAsync(prompt).asObservable()
+        return engine.createConversation()
+    }
+
+    /**
+     * Sends [prompt] to an existing [conversation] and emits accumulated partial tokens
+     * as [Observable] strings.  Completes when the model finishes or [cancelGeneration] is called.
+     * The conversation's context (previous turns) is preserved by the engine.
+     */
+    fun sendMessage(conversation: Conversation, prompt: String): Observable<String> {
+        isCancelled.set(false)
+        return conversation.sendMessageAsync(prompt).asObservable()
             .map { message -> message.contents.contents.joinToString(" ") { it.toString() } }
             .startWithItem("").scan { acc, token -> acc + token }
-//        return Observable.just("Not implemented yet")
+    }
+
+    /**
+     * Closes a [Conversation] and releases its native resources.
+     * The conversation must not be used after this call.
+     */
+    fun closeConversation(conversation: Conversation) {
+        try {
+            conversation.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing conversation", e)
+        }
     }
 
     /** Signals the ongoing generation to stop early. */

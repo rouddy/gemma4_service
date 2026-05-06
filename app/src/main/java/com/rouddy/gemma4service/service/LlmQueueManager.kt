@@ -90,7 +90,7 @@ class LlmQueueManager(private val engine: GemmaInferenceEngine) {
 
         stateStream.onNext(LlmState.Processing(request.requestId, ""))
 
-        currentDisposable = engine.generate(request.prompt)
+        currentDisposable = engine.sendMessage(request.conversation, request.prompt)
             .subscribeOn(Schedulers.io())
             .subscribe(
                 { partialText ->
