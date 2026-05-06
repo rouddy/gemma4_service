@@ -6,11 +6,13 @@ import com.google.ai.edge.litertlm.*
 import com.jakewharton.rxrelay3.BehaviorRelay
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.schedulers.Schedulers
 import kotlinx.coroutines.rx3.asObservable
 import java.io.File
 import java.net.URL
 import java.util.Collections
+import java.util.concurrent.TimeUnit
 
 /**
  * Wraps the MediaPipe LLM Inference API for the Gemma 4 4BE model.
@@ -45,12 +47,15 @@ class GemmaInferenceEngine(private val context: Context) {
     private val activeConversations: MutableSet<Conversation> =
         Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
+    /** Disposable for the in-flight initialisation subscription; disposed in [close]. */
+    private var initDisposable: Disposable? = null
+
     /**
      * Starts downloading the model (if needed) and initialising the [Engine]
      * on an IO thread.  Once ready, the engine is pushed into [engineRelay].
      */
     fun initialize() {
-        Single.fromCallable { downloadModelIfNeeded() }
+        initDisposable = Single.fromCallable { downloadModelIfNeeded() }
             .subscribeOn(Schedulers.io())
             .subscribe(
                 { modelPath ->
@@ -62,7 +67,7 @@ class GemmaInferenceEngine(private val context: Context) {
                     engineRelay.accept(engine)
                 },
                 { error ->
-                    Log.e(TAG, "Failed to initialise GemmaInferenceEngine", error)
+                    Log.e(TAG, "Failed to initialise GemmaInferenceEngine: ${error.message}", error)
                 }
             )
     }
@@ -72,10 +77,17 @@ class GemmaInferenceEngine(private val context: Context) {
         val file = File(context.filesDir, MODEL_FILE)
         if (!file.exists()) {
             Log.i(TAG, "Downloading model from $MODEL_URL")
-            URL(MODEL_URL).openStream().use { input ->
-                file.outputStream().use { output ->
-                    input.copyTo(output)
+            val tmp = File(context.filesDir, "$MODEL_FILE.tmp")
+            try {
+                URL(MODEL_URL).openStream().use { input ->
+                    tmp.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
                 }
+                tmp.renameTo(file)
+            } catch (e: Exception) {
+                tmp.delete()
+                throw e
             }
             Log.i(TAG, "Model downloaded to ${file.absolutePath}")
         }
@@ -85,9 +97,11 @@ class GemmaInferenceEngine(private val context: Context) {
     /**
      * Returns a [Single] that emits a new [Conversation] as soon as the engine
      * is ready.  The conversation preserves context across multiple [sendMessage] calls.
+     * Times out after 5 minutes to prevent indefinite blocking if initialisation fails.
      */
     fun createConversation(): Single<Conversation> {
         return engineRelay.firstOrError()
+            .timeout(5, TimeUnit.MINUTES)
             .map { engine -> engine.createConversation() }
     }
 
@@ -132,6 +146,7 @@ class GemmaInferenceEngine(private val context: Context) {
 
     /** Releases native resources. */
     fun close() {
+        initDisposable?.dispose()
         engineRelay.value?.close()
     }
 }
