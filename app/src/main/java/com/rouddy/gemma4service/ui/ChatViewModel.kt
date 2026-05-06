@@ -57,7 +57,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "Service connected")
             _statusText.postValue("Service connected")
             conversationId = llmService?.createConversation() ?: -1
-            Log.d(TAG, "Created conversation: $conversationId")
+            if (conversationId == -1) {
+                Log.w(TAG, "Failed to create conversation after service connected")
+                _statusText.postValue(getApplication<Application>().getString(R.string.status_conversation_failed))
+            } else {
+                Log.d(TAG, "Created conversation: $conversationId")
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -99,7 +104,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (conversationId == -1) {
-            _statusText.value = getApplication<Application>().getString(R.string.status_service_not_connected)
+            _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
             return
         }
 

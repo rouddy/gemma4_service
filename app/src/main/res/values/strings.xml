@@ -16,4 +16,5 @@
     <string name="msg_cancelled">[취소됨]</string>
     <string name="msg_error">[오류: %s]</string>
     <string name="status_service_not_connected">Service not connected</string>
+    <string name="status_conversation_failed">대화 세션 생성 실패</string>
 </resources>

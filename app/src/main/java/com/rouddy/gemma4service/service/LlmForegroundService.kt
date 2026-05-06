@@ -15,6 +15,7 @@ import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.inference.GemmaInferenceEngine
 import com.rouddy.gemma4service.model.LlmRequest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Foreground service that hosts the Gemma 4 LLM inference engine.
@@ -33,7 +34,8 @@ class LlmForegroundService : Service() {
     private lateinit var inferenceEngine: GemmaInferenceEngine
     private lateinit var queueManager: LlmQueueManager
 
-    /** Active conversations keyed by their hashCode (the conversationId exposed to clients). */
+    /** Active conversations keyed by a monotonically increasing integer ID. */
+    private val conversationIdCounter = AtomicInteger(0)
     private val conversations = ConcurrentHashMap<Int, Conversation>()
 
     // ---- AIDL stub implementation ----
@@ -42,7 +44,7 @@ class LlmForegroundService : Service() {
         override fun createConversation(): Int {
             return try {
                 val conversation = inferenceEngine.createConversation()
-                val id = conversation.hashCode()
+                val id = conversationIdCounter.incrementAndGet()
                 conversations[id] = conversation
                 Log.d(TAG, "createConversation: id=$id")
                 id
