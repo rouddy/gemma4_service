@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.androidx.recyclerview)
     implementation(libs.ai.edge.litertlm.android)
     implementation(libs.rxjava3)
+    implementation(libs.rxrelay3)
     implementation(libs.rxkotlin)
     implementation(libs.kotinx.coroutines.to.rx3)
     implementation(libs.rxandroid)
