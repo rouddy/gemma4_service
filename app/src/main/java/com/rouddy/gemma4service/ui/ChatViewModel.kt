@@ -18,7 +18,9 @@ import com.rouddy.gemma4service.service.LlmForegroundService
 import com.rouddy.gemma4service.ui.ChatMessage
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Observable
+import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.disposables.CompositeDisposable
+import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.subjects.PublishSubject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -56,13 +58,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             isBound = true
             Log.d(TAG, "Service connected")
             _statusText.postValue("Service connected")
-            conversationId = llmService?.createConversation() ?: -1
-            if (conversationId == -1) {
-                Log.w(TAG, "Failed to create conversation after service connected")
-                _statusText.postValue(getApplication<Application>().getString(R.string.status_conversation_failed))
-            } else {
-                Log.d(TAG, "Created conversation: $conversationId")
-            }
+            val service = llmService ?: return
+            val disposable = Single.fromCallable { service.createConversation() }
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(
+                    { id ->
+                        conversationId = id
+                        if (conversationId == -1) {
+                            Log.w(TAG, "Failed to create conversation after service connected")
+                            _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
+                        } else {
+                            Log.d(TAG, "Created conversation: $conversationId")
+                        }
+                    },
+                    { error ->
+                        Log.e(TAG, "createConversation error", error)
+                        _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
+                    }
+                )
+            compositeDisposable.add(disposable)
         }
 
         override fun onServiceDisconnected(name: ComponentName) {

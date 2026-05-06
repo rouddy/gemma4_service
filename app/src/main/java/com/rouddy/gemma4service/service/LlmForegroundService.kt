@@ -43,7 +43,7 @@ class LlmForegroundService : Service() {
 
         override fun createConversation(): Int {
             return try {
-                val conversation = inferenceEngine.createConversation()
+                val conversation = inferenceEngine.createConversation().blockingGet()
                 val id = conversationIdCounter.incrementAndGet()
                 conversations[id] = conversation
                 Log.d(TAG, "createConversation: id=$id")
