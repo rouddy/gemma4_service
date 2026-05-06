@@ -7,14 +7,15 @@ import com.rouddy.gemma4service.model.LlmState
 import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.subjects.BehaviorSubject
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Manages the FIFO queue of LLM requests and drives the [GemmaInferenceEngine].
+ * Manages concurrent LLM requests and drives the [GemmaInferenceEngine].
  *
- * Thread-safety:  All mutation of the queue is performed on a single-threaded
- * Schedulers.single() scheduler so that add/remove/process operations are serialised.
+ * All incoming requests are processed immediately in parallel so that
+ * multiple client apps (and multiple conversations) can generate responses
+ * at the same time.  In-flight requests are tracked in [inFlight] and can
+ * be individually cancelled via [cancel].
  */
 class LlmQueueManager(private val engine: GemmaInferenceEngine) {
 
@@ -22,10 +23,8 @@ class LlmQueueManager(private val engine: GemmaInferenceEngine) {
         private const val TAG = "LlmQueueManager"
     }
 
-    private val queue = ConcurrentLinkedQueue<LlmRequest>()
-    private val isProcessing = AtomicBoolean(false)
-    private var currentRequestId: String? = null
-    private var currentDisposable: Disposable? = null
+    /** requestId → (request, disposable) for every in-flight generation. */
+    private val inFlight = ConcurrentHashMap<String, Pair<LlmRequest, Disposable>>()
 
     /**
      * A [BehaviorSubject] that emits [LlmState] updates for ALL requests.
@@ -33,64 +32,36 @@ class LlmQueueManager(private val engine: GemmaInferenceEngine) {
      */
     val stateStream: BehaviorSubject<LlmState> = BehaviorSubject.create()
 
-    /** Adds a request to the queue and notifies it of its position, then kicks off processing. */
+    /** Starts processing [request] immediately (no waiting queue). */
     fun enqueue(request: LlmRequest) {
-        queue.add(request)
-        // Notify this request of its queue position
-        val position = queue.size - 1
-        notifyWaiting(request, position)
-        // Re-notify all waiting requests of their updated positions
-        updateWaitingPositions()
-        tryProcessNext()
+        processRequest(request)
     }
 
     /**
      * Cancels a request by ID.
      * - If the request is currently being processed, cancels generation.
-     * - If it is in the queue, removes it and updates positions for the rest.
      * @return true if found and cancelled.
      */
     fun cancel(requestId: String): Boolean {
-        if (currentRequestId == requestId) {
-            Log.d(TAG, "Cancelling in-progress request: $requestId")
-            engine.cancelGeneration()
-            currentDisposable?.dispose()
-            currentRequestId = null
-            isProcessing.set(false)
-            stateStream.onNext(LlmState.Error(requestId, "cancelled"))
-            tryProcessNext()
-            return true
+        val (request, disposable) = inFlight.remove(requestId) ?: run {
+            Log.w(TAG, "cancel: unknown requestId=$requestId")
+            return false
         }
-
-        val removed = queue.removeIf { it.requestId == requestId }
-        if (removed) {
-            Log.d(TAG, "Removed queued request: $requestId")
-            stateStream.onNext(LlmState.Error(requestId, "cancelled"))
-            updateWaitingPositions()
-        }
-        return removed
+        Log.d(TAG, "Cancelling in-progress request: $requestId")
+        engine.cancelGeneration(request.conversation)
+        disposable.dispose()
+        stateStream.onNext(LlmState.Error(requestId, "cancelled"))
+        return true
     }
 
-    /** Returns the number of requests currently waiting (not in-progress). */
-    fun queueSize(): Int = queue.size
-
-    private fun tryProcessNext() {
-        if (isProcessing.get()) return
-        val next = queue.poll() ?: return
-        isProcessing.set(true)
-        currentRequestId = next.requestId
-        processRequest(next)
-    }
+    /** Returns the number of requests currently in-flight. */
+    fun queueSize(): Int = inFlight.size
 
     private fun processRequest(request: LlmRequest) {
         Log.d(TAG, "Processing request: ${request.requestId}")
-
-        // Notify remaining waiting requests of new positions
-        updateWaitingPositions()
-
         stateStream.onNext(LlmState.Processing(request.requestId, ""))
 
-        currentDisposable = engine.generate(request.prompt)
+        val disposable = engine.sendMessage(request.conversation, request.prompt)
             .subscribeOn(Schedulers.io())
             .subscribe(
                 { partialText ->
@@ -104,6 +75,7 @@ class LlmQueueManager(private val engine: GemmaInferenceEngine) {
                 },
                 { error ->
                     Log.e(TAG, "Generation error for ${request.requestId}", error)
+                    inFlight.remove(request.requestId)
                     val state = LlmState.Error(request.requestId, error.message ?: "unknown error")
                     stateStream.onNext(state)
                     try {
@@ -111,10 +83,10 @@ class LlmQueueManager(private val engine: GemmaInferenceEngine) {
                     } catch (e: Exception) {
                         Log.w(TAG, "Callback onError failed", e)
                     }
-                    finishCurrent()
                 },
                 {
                     // onComplete
+                    inFlight.remove(request.requestId)
                     val lastText = (stateStream.value as? LlmState.Processing)?.partialText ?: ""
                     val state = LlmState.Completed(request.requestId, lastText)
                     stateStream.onNext(state)
@@ -123,39 +95,21 @@ class LlmQueueManager(private val engine: GemmaInferenceEngine) {
                     } catch (e: Exception) {
                         Log.w(TAG, "Callback onCompleted failed", e)
                     }
-                    finishCurrent()
                 }
             )
+
+        // Store only if the request hasn't already completed synchronously
+        inFlight.putIfAbsent(request.requestId, Pair(request, disposable))
     }
 
-    private fun finishCurrent() {
-        currentRequestId = null
-        currentDisposable = null
-        isProcessing.set(false)
-        tryProcessNext()
-    }
-
-    private fun notifyWaiting(request: LlmRequest, position: Int) {
-        stateStream.onNext(LlmState.Waiting(request.requestId, position))
-        try {
-            request.callback.onWaiting(request.requestId, position)
-        } catch (e: Exception) {
-            Log.w(TAG, "Callback onWaiting failed", e)
-        }
-    }
-
-    private fun updateWaitingPositions() {
-        queue.forEachIndexed { index, request ->
-            notifyWaiting(request, index)
-        }
-    }
-
-    /** Shuts down and cancels all pending requests. */
+    /** Shuts down and cancels all in-flight requests. */
     fun shutdown() {
-        currentDisposable?.dispose()
-        engine.cancelGeneration()
-        queue.clear()
-        isProcessing.set(false)
-        currentRequestId = null
+        val snapshot = inFlight.entries.toList()
+        inFlight.clear()
+        snapshot.forEach { (_, pair) ->
+            val (request, disposable) = pair
+            engine.cancelGeneration(request.conversation)
+            disposable.dispose()
+        }
     }
 }
