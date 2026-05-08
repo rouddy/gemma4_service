@@ -22,7 +22,6 @@ import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.databinding.ActivityMainBinding
 import com.rouddy.gemma4service.service.LlmForegroundService
 import com.rouddy.gemma4service.storage.ConversationStore
-import kotlin.math.max
 
 class MainActivity : AppCompatActivity() {
 
@@ -111,8 +110,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val closed = service.closeConversation(conversation.id)
                     if (!closed) {
-                        Toast.makeText(this, R.string.conversation_delete_failed, Toast.LENGTH_SHORT)
-                            .show()
+                        conversationStore.removeConversation(conversation.id)
                     }
                 }
                 conversationAdapter.closeDelete()
@@ -162,7 +160,7 @@ class MainActivity : AppCompatActivity() {
             isCurrentlyActive: Boolean
         ) {
             val maxSwipeOffset = resources.getDimension(R.dimen.conversation_delete_width)
-            val clampedDx = max(dX, -maxSwipeOffset)
+            val clampedDx = dX.coerceIn(-maxSwipeOffset, 0f)
             super.onChildDraw(c, recyclerView, viewHolder, clampedDx, dY, actionState, isCurrentlyActive)
         }
     }

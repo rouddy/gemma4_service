@@ -168,7 +168,12 @@ class ConversationStore(context: Context) {
         for (index in 0 until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             if (message.optBoolean(KEY_IS_USER)) {
-                return message.optString(KEY_TEXT).trim().ifEmpty { defaultTitle }.take(TITLE_MAX_LENGTH)
+                val title = message.optString(KEY_TEXT).trim().ifEmpty { defaultTitle }
+                return if (title.length > TITLE_MAX_LENGTH) {
+                    title.take(TITLE_MAX_LENGTH) + "..."
+                } else {
+                    title
+                }
             }
         }
         return defaultTitle

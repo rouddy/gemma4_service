@@ -96,6 +96,7 @@ class LlmForegroundService : Service() {
         super.onCreate()
         Log.i(TAG, "Service created")
         conversationStore = ConversationStore(applicationContext)
+        conversationIdCounter.set(conversationStore.getConversationSummaries().maxOfOrNull { it.id } ?: 0)
         inferenceEngine = GemmaInferenceEngine(applicationContext)
         try {
             inferenceEngine.initialize()
@@ -113,9 +114,8 @@ class LlmForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         queueManager.shutdown()
-        conversations.forEach { (id, conversation) ->
+        conversations.values.forEach { conversation ->
             inferenceEngine.closeConversation(conversation)
-            conversationStore.removeConversation(id)
         }
         conversations.clear()
         inferenceEngine.close()
