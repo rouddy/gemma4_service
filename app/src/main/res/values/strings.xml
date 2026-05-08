@@ -20,6 +20,8 @@
     <string name="status_service_connected">Service connected</string>
     <string name="status_service_disconnected">Service disconnected</string>
     <string name="status_conversation_missing">대화 세션을 찾을 수 없습니다</string>
+    <string name="conversation_default_title">새 대화</string>
+    <string name="conversation_empty_preview">대화가 비어 있습니다</string>
     <string name="conversation_list_title">Conversation</string>
     <string name="conversation_chat_title">채팅</string>
     <string name="conversation_new">새 대화 시작</string>

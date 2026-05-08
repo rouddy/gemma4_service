@@ -2,6 +2,7 @@ package com.rouddy.gemma4service.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.ui.ChatMessage
 import org.json.JSONArray
 import org.json.JSONObject
@@ -29,12 +30,14 @@ class ConversationStore(context: Context) {
         private const val KEY_TEXT = "text"
         private const val KEY_IS_USER = "isUser"
         private const val KEY_IS_STREAMING = "isStreaming"
-        private const val DEFAULT_TITLE = "새 대화"
         private const val TITLE_MAX_LENGTH = 24
     }
 
+    private val appContext = context.applicationContext
     private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val defaultTitle = appContext.getString(R.string.conversation_default_title)
+    private val emptyPreview = appContext.getString(R.string.conversation_empty_preview)
 
     fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -51,7 +54,7 @@ class ConversationStore(context: Context) {
         conversations.put(
             JSONObject()
                 .put(KEY_ID, conversationId)
-                .put(KEY_TITLE, DEFAULT_TITLE)
+                .put(KEY_TITLE, defaultTitle)
                 .put(KEY_UPDATED_AT, System.currentTimeMillis())
                 .put(KEY_MESSAGES, JSONArray())
         )
@@ -132,7 +135,7 @@ class ConversationStore(context: Context) {
                 add(
                     ConversationSummary(
                         id = item.optInt(KEY_ID),
-                        title = item.optString(KEY_TITLE, DEFAULT_TITLE),
+                        title = item.optString(KEY_TITLE, defaultTitle),
                         preview = buildPreview(messages),
                         updatedAt = item.optLong(KEY_UPDATED_AT),
                         messageCount = messages.length()
@@ -165,10 +168,10 @@ class ConversationStore(context: Context) {
         for (index in 0 until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             if (message.optBoolean(KEY_IS_USER)) {
-                return message.optString(KEY_TEXT).trim().ifEmpty { DEFAULT_TITLE }.take(TITLE_MAX_LENGTH)
+                return message.optString(KEY_TEXT).trim().ifEmpty { defaultTitle }.take(TITLE_MAX_LENGTH)
             }
         }
-        return DEFAULT_TITLE
+        return defaultTitle
     }
 
     private fun buildPreview(messages: JSONArray): String {
@@ -177,7 +180,7 @@ class ConversationStore(context: Context) {
             val text = message.optString(KEY_TEXT).trim()
             if (text.isNotEmpty()) return text
         }
-        return "대화가 비어 있습니다"
+        return emptyPreview
     }
 
     private fun findConversation(conversations: JSONArray, conversationId: Int): JSONObject? {

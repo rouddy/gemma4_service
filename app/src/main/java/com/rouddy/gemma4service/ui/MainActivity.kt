@@ -161,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             actionState: Int,
             isCurrentlyActive: Boolean
         ) {
-            val maxSwipeOffset = resources.getDimension(com.rouddy.gemma4service.R.dimen.conversation_delete_width)
+            val maxSwipeOffset = resources.getDimension(R.dimen.conversation_delete_width)
             val clampedDx = max(dX, -maxSwipeOffset)
             super.onChildDraw(c, recyclerView, viewHolder, clampedDx, dY, actionState, isCurrentlyActive)
         }
