@@ -3,6 +3,7 @@ pluginManagement {
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.android\\.tools.*")
                 includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
             }
@@ -24,4 +25,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Gemma4Service"
 include(":app")
- 
