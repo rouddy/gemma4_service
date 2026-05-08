@@ -15,6 +15,10 @@
         android:theme="@style/Theme.Gemma4service">
 
         <activity
+            android:name="com.rouddy.gemma4service.ui.ConversationActivity"
+            android:exported="false" />
+
+        <activity
             android:name="com.rouddy.gemma4service.ui.MainActivity"
             android:exported="true">
             <intent-filter>

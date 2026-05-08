@@ -13,17 +13,13 @@ import androidx.lifecycle.MutableLiveData
 import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.ILlmCallback
 import com.rouddy.gemma4service.ILlmService
-import com.rouddy.gemma4service.model.LlmState
 import com.rouddy.gemma4service.service.LlmForegroundService
-import com.rouddy.gemma4service.ui.ChatMessage
+import com.rouddy.gemma4service.storage.ConversationStore
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
-import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.schedulers.Schedulers
-import io.reactivex.rxjava3.subjects.PublishSubject
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -31,85 +27,56 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         private const val TAG = "ChatViewModel"
     }
 
+    private val store = ConversationStore(application)
+    private val compositeDisposable = CompositeDisposable()
+
     private val _messages = MutableLiveData<List<ChatMessage>>(emptyList())
     val messages: LiveData<List<ChatMessage>> = _messages
 
     private val _statusText = MutableLiveData<String>("")
     val statusText: LiveData<String> = _statusText
 
-    /** RxKotlin subject that emits LlmState updates from the service (for the UI layer). */
-    private val stateSubject = PublishSubject.create<LlmState>()
-    val llmStateStream: Observable<LlmState> = stateSubject.hide()
-
-    private val compositeDisposable = CompositeDisposable()
-
-    // Maps requestId -> ChatMessage id in the list
-    private val requestToMessageId = ConcurrentHashMap<String, String>()
-
     private var llmService: ILlmService? = null
     private var isBound = false
-
-    // Active conversation ID obtained from the service (-1 = not yet created)
+    private var creatingConversation = false
+    private var attached = false
+    private var shouldCreateConversation = false
     private var conversationId: Int = -1
+    private var lastRequestId: String? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             llmService = ILlmService.Stub.asInterface(binder)
             isBound = true
-            Log.d(TAG, "Service connected")
-            _statusText.postValue("Service connected")
-            val service = llmService ?: return
-            val disposable = Single.fromCallable { service.createConversation() }
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(
-                    { id ->
-                        conversationId = id
-                        if (conversationId == -1) {
-                            Log.w(TAG, "Failed to create conversation after service connected")
-                            _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
-                        } else {
-                            Log.d(TAG, "Created conversation: $conversationId")
-                        }
-                    },
-                    { error ->
-                        Log.e(TAG, "createConversation error", error)
-                        _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
-                    }
-                )
-            compositeDisposable.add(disposable)
+            _statusText.postValue(getApplication<Application>().getString(R.string.status_service_connected))
+            if (conversationId != -1) {
+                reloadMessages()
+            } else {
+                createConversationIfNeeded()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             llmService = null
             isBound = false
-            conversationId = -1
-            Log.d(TAG, "Service disconnected")
-            _statusText.postValue("Service disconnected")
+            _statusText.postValue(getApplication<Application>().getString(R.string.status_service_disconnected))
         }
     }
 
     init {
         bindToService()
-        observeLlmStates()
     }
 
-    private fun bindToService() {
-        val intent = Intent(getApplication(), LlmForegroundService::class.java)
-        getApplication<Application>().bindService(
-            intent, serviceConnection, Context.BIND_AUTO_CREATE
-        )
-        // Also start the service so it becomes a foreground service
-        getApplication<Application>().startService(intent)
-    }
-
-    private fun observeLlmStates() {
-        val disposable = llmStateStream
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe { state ->
-                handleLlmState(state)
-            }
-        compositeDisposable.add(disposable)
+    fun attachConversation(requestedConversationId: Int) {
+        if (attached) return
+        attached = true
+        if (requestedConversationId > 0) {
+            conversationId = requestedConversationId
+            reloadMessages()
+        } else {
+            shouldCreateConversation = true
+            createConversationIfNeeded()
+        }
     }
 
     fun sendMessage(text: String) {
@@ -123,115 +90,92 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // Add user message to list
-        val userMsg = ChatMessage(id = UUID.randomUUID().toString(), text = text, isUser = true)
-        appendMessage(userMsg)
-
-        // Add placeholder AI message
-        val aiMsgId = UUID.randomUUID().toString()
-        val aiMsg = ChatMessage(id = aiMsgId, text = "", isUser = false, isStreaming = true)
-        appendMessage(aiMsg)
-
         val requestId = UUID.randomUUID().toString()
-        requestToMessageId[requestId] = aiMsgId
-
-        val callback = object : ILlmCallback.Stub() {
-            override fun onWaiting(requestId: String, queuePosition: Int) {
-                val state = LlmState.Waiting(requestId, queuePosition)
-                stateSubject.onNext(state)
-            }
-
-            override fun onProcessing(requestId: String, partialText: String) {
-                val state = LlmState.Processing(requestId, partialText)
-                stateSubject.onNext(state)
-            }
-
-            override fun onCompleted(requestId: String, fullText: String) {
-                val state = LlmState.Completed(requestId, fullText)
-                stateSubject.onNext(state)
-            }
-
-            override fun onError(requestId: String, reason: String) {
-                val state = LlmState.Error(requestId, reason)
-                stateSubject.onNext(state)
-            }
+        lastRequestId = requestId
+        val accepted = service.sendMessage(conversationId, requestId, text, callbackForRequest())
+        if (accepted) {
+            reloadMessages()
+        } else {
+            _statusText.value = getApplication<Application>().getString(R.string.status_conversation_missing)
         }
-
-        service.sendMessage(conversationId, requestId, text, callback)
     }
 
     fun cancelLastRequest() {
         val service = llmService ?: return
-        val lastRequestId = requestToMessageId.keys.lastOrNull() ?: return
-        service.cancelRequest(lastRequestId)
+        val requestId = lastRequestId ?: return
+        service.cancelRequest(requestId)
     }
 
-    private fun handleLlmState(state: LlmState) {
-        val res = getApplication<Application>().resources
-        when (state) {
-            is LlmState.Waiting -> {
-                val msgId = requestToMessageId[state.requestId] ?: return
-                updateMessage(msgId) { msg ->
-                    msg.copy(
-                        text = res.getString(R.string.status_waiting_queue, state.queuePosition),
-                        isStreaming = true
-                    )
+    private fun bindToService() {
+        val intent = Intent(getApplication(), LlmForegroundService::class.java)
+        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        getApplication<Application>().startService(intent)
+    }
+
+    private fun createConversationIfNeeded() {
+        val service = llmService ?: return
+        if (!shouldCreateConversation || conversationId != -1 || creatingConversation) return
+
+        creatingConversation = true
+        val disposable = Single.fromCallable { service.createConversation() }
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe(
+                { id ->
+                    creatingConversation = false
+                    if (id == -1) {
+                        _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
+                    } else {
+                        conversationId = id
+                        shouldCreateConversation = false
+                        reloadMessages()
+                    }
+                },
+                { error ->
+                    creatingConversation = false
+                    Log.e(TAG, "createConversation error", error)
+                    _statusText.value = getApplication<Application>().getString(R.string.status_conversation_failed)
                 }
-                _statusText.value = res.getString(R.string.status_waiting, state.queuePosition)
-            }
-            is LlmState.Processing -> {
-                val msgId = requestToMessageId[state.requestId] ?: return
-                updateMessage(msgId) { msg ->
-                    msg.copy(text = state.partialText, isStreaming = true)
-                }
-                _statusText.value = res.getString(R.string.status_processing)
-            }
-            is LlmState.Completed -> {
-                val msgId = requestToMessageId[state.requestId] ?: return
-                updateMessage(msgId) { msg ->
-                    msg.copy(text = state.fullText, isStreaming = false)
-                }
-                requestToMessageId.remove(state.requestId)
-                _statusText.value = res.getString(R.string.status_completed)
-            }
-            is LlmState.Error -> {
-                val msgId = requestToMessageId[state.requestId] ?: return
-                val displayText = if (state.reason == "cancelled") {
-                    res.getString(R.string.msg_cancelled)
-                } else {
-                    res.getString(R.string.msg_error, state.reason)
-                }
-                updateMessage(msgId) { msg ->
-                    msg.copy(text = displayText, isStreaming = false)
-                }
-                requestToMessageId.remove(state.requestId)
-                _statusText.value = if (state.reason == "cancelled") {
-                    res.getString(R.string.status_cancelled)
-                } else {
-                    res.getString(R.string.status_error, state.reason)
-                }
-            }
+            )
+        compositeDisposable.add(disposable)
+    }
+
+    private fun callbackForRequest() = object : ILlmCallback.Stub() {
+        override fun onWaiting(requestId: String, queuePosition: Int) {
+            _statusText.postValue(
+                getApplication<Application>().getString(R.string.status_waiting, queuePosition)
+            )
+        }
+
+        override fun onProcessing(requestId: String, partialText: String) {
+            reloadMessages()
+            _statusText.postValue(getApplication<Application>().getString(R.string.status_processing))
+        }
+
+        override fun onCompleted(requestId: String, fullText: String) {
+            reloadMessages()
+            _statusText.postValue(getApplication<Application>().getString(R.string.status_completed))
+        }
+
+        override fun onError(requestId: String, reason: String) {
+            reloadMessages()
+            val app = getApplication<Application>()
+            _statusText.postValue(
+                if (reason == "cancelled") app.getString(R.string.status_cancelled)
+                else app.getString(R.string.status_error, reason)
+            )
         }
     }
 
-    private fun appendMessage(msg: ChatMessage) {
-        val current = _messages.value.orEmpty()
-        _messages.value = current + msg
-    }
-
-    private fun updateMessage(msgId: String, transform: (ChatMessage) -> ChatMessage) {
-        val current = _messages.value.orEmpty()
-        _messages.value = current.map { if (it.id == msgId) transform(it) else it }
+    private fun reloadMessages() {
+        if (conversationId == -1) return
+        _messages.postValue(store.getConversationMessages(conversationId))
     }
 
     override fun onCleared() {
         super.onCleared()
         compositeDisposable.dispose()
         if (isBound) {
-            if (conversationId != -1) {
-                llmService?.closeConversation(conversationId)
-                conversationId = -1
-            }
             getApplication<Application>().unbindService(serviceConnection)
             isBound = false
         }

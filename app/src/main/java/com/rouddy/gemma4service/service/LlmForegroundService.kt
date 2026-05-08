@@ -14,15 +14,10 @@ import com.rouddy.gemma4service.ILlmService
 import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.inference.GemmaInferenceEngine
 import com.rouddy.gemma4service.model.LlmRequest
+import com.rouddy.gemma4service.storage.ConversationStore
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * Foreground service that hosts the Gemma 4 LLM inference engine.
- * Exposed via AIDL so other apps can bind and submit requests.
- *
- * android:exported="true" is set in AndroidManifest.xml
- */
 class LlmForegroundService : Service() {
 
     companion object {
@@ -33,12 +28,11 @@ class LlmForegroundService : Service() {
 
     private lateinit var inferenceEngine: GemmaInferenceEngine
     private lateinit var queueManager: LlmQueueManager
+    private lateinit var conversationStore: ConversationStore
 
-    /** Active conversations keyed by a monotonically increasing integer ID. */
     private val conversationIdCounter = AtomicInteger(0)
     private val conversations = ConcurrentHashMap<Int, Conversation>()
 
-    // ---- AIDL stub implementation ----
     private val binder = object : ILlmService.Stub() {
 
         override fun createConversation(): Int {
@@ -46,6 +40,7 @@ class LlmForegroundService : Service() {
                 val conversation = inferenceEngine.createConversation().blockingGet()
                 val id = conversationIdCounter.incrementAndGet()
                 conversations[id] = conversation
+                conversationStore.createConversation(id)
                 Log.d(TAG, "createConversation: id=$id")
                 id
             } catch (e: Exception) {
@@ -65,8 +60,14 @@ class LlmForegroundService : Service() {
                 Log.w(TAG, "sendMessage: unknown conversationId=$conversationId")
                 return false
             }
+            conversationStore.appendPendingExchange(conversationId, requestId, message)
             Log.d(TAG, "sendMessage: conversationId=$conversationId requestId=$requestId")
-            val request = LlmRequest(requestId, message, callback, conversation)
+            val request = LlmRequest(
+                requestId = requestId,
+                prompt = message,
+                callback = callbackWithPersistence(conversationId, callback),
+                conversation = conversation
+            )
             queueManager.enqueue(request)
             return true
         }
@@ -77,7 +78,9 @@ class LlmForegroundService : Service() {
                 return false
             }
             Log.d(TAG, "closeConversation: id=$conversationId")
+            queueManager.cancelConversationRequests(conversation)
             inferenceEngine.closeConversation(conversation)
+            conversationStore.removeConversation(conversationId)
             return true
         }
 
@@ -92,6 +95,7 @@ class LlmForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "Service created")
+        conversationStore = ConversationStore(applicationContext)
         inferenceEngine = GemmaInferenceEngine(applicationContext)
         try {
             inferenceEngine.initialize()
@@ -104,20 +108,48 @@ class LlmForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         super.onDestroy()
         queueManager.shutdown()
-        conversations.values.forEach { inferenceEngine.closeConversation(it) }
+        conversations.forEach { (id, conversation) ->
+            inferenceEngine.closeConversation(conversation)
+            conversationStore.removeConversation(id)
+        }
         conversations.clear()
         inferenceEngine.close()
         Log.i(TAG, "Service destroyed")
     }
 
-    // ---- Notification helpers ----
+    private fun callbackWithPersistence(
+        conversationId: Int,
+        delegate: ILlmCallback
+    ) = object : ILlmCallback.Stub() {
+        override fun onWaiting(requestId: String, queuePosition: Int) {
+            delegate.onWaiting(requestId, queuePosition)
+        }
+
+        override fun onProcessing(requestId: String, partialText: String) {
+            conversationStore.updateAssistantMessage(conversationId, requestId, partialText, true)
+            delegate.onProcessing(requestId, partialText)
+        }
+
+        override fun onCompleted(requestId: String, fullText: String) {
+            conversationStore.updateAssistantMessage(conversationId, requestId, fullText, false)
+            delegate.onCompleted(requestId, fullText)
+        }
+
+        override fun onError(requestId: String, reason: String) {
+            val displayText = if (reason == "cancelled") {
+                getString(R.string.msg_cancelled)
+            } else {
+                getString(R.string.msg_error, reason)
+            }
+            conversationStore.updateAssistantMessage(conversationId, requestId, displayText, false)
+            delegate.onError(requestId, reason)
+        }
+    }
 
     private fun buildNotification(): Notification {
         createNotificationChannel()
