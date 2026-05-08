@@ -82,7 +82,7 @@ class ConversationListAdapter(
                 item.messageCount
             )
             binding.foregroundView.translationX = if (isOpened) {
-                -binding.root.resources.displayMetrics.density * 88f
+                -context.resources.getDimension(R.dimen.conversation_delete_width)
             } else {
                 0f
             }

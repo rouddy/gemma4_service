@@ -9,7 +9,7 @@
     <com.google.android.material.button.MaterialButton
         android:id="@+id/deleteButton"
         style="@style/Widget.Material3.Button"
-        android:layout_width="88dp"
+        android:layout_width="@dimen/conversation_delete_width"
         android:layout_height="match_parent"
         android:layout_gravity="end"
         android:backgroundTint="@android:color/holo_red_dark"

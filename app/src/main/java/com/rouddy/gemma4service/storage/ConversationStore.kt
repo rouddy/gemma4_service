@@ -30,6 +30,7 @@ class ConversationStore(context: Context) {
         private const val KEY_IS_USER = "isUser"
         private const val KEY_IS_STREAMING = "isStreaming"
         private const val DEFAULT_TITLE = "새 대화"
+        private const val TITLE_MAX_LENGTH = 24
     }
 
     private val prefs: SharedPreferences =
@@ -164,7 +165,7 @@ class ConversationStore(context: Context) {
         for (index in 0 until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             if (message.optBoolean(KEY_IS_USER)) {
-                return message.optString(KEY_TEXT).trim().ifEmpty { DEFAULT_TITLE }.take(24)
+                return message.optString(KEY_TEXT).trim().ifEmpty { DEFAULT_TITLE }.take(TITLE_MAX_LENGTH)
             }
         }
         return DEFAULT_TITLE
