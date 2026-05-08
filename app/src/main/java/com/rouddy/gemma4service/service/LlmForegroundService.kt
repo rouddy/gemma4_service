@@ -96,7 +96,7 @@ class LlmForegroundService : Service() {
         super.onCreate()
         Log.i(TAG, "Service created")
         conversationStore = ConversationStore(applicationContext)
-        conversationIdCounter.set(conversationStore.getConversationSummaries().maxOfOrNull { it.id } ?: 0)
+        conversationIdCounter.set(conversationStore.getMaxConversationId())
         inferenceEngine = GemmaInferenceEngine(applicationContext)
         try {
             inferenceEngine.initialize()

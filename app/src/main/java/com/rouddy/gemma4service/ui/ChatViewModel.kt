@@ -19,6 +19,7 @@ import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.schedulers.Schedulers
+import java.lang.ref.WeakReference
 import java.util.UUID
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -92,7 +93,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val requestId = UUID.randomUUID().toString()
         lastRequestId = requestId
-        val accepted = service.sendMessage(conversationId, requestId, text, callbackForRequest())
+        val accepted = service.sendMessage(conversationId, requestId, text, ServiceCallback(this))
         if (accepted) {
             reloadMessages()
         } else {
@@ -140,36 +141,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         compositeDisposable.add(disposable)
     }
 
-    private fun callbackForRequest() = object : ILlmCallback.Stub() {
-        override fun onWaiting(requestId: String, queuePosition: Int) {
-            _statusText.postValue(
-                getApplication<Application>().getString(R.string.status_waiting, queuePosition)
-            )
-        }
-
-        override fun onProcessing(requestId: String, partialText: String) {
-            reloadMessages()
-            _statusText.postValue(getApplication<Application>().getString(R.string.status_processing))
-        }
-
-        override fun onCompleted(requestId: String, fullText: String) {
-            reloadMessages()
-            _statusText.postValue(getApplication<Application>().getString(R.string.status_completed))
-        }
-
-        override fun onError(requestId: String, reason: String) {
-            reloadMessages()
-            val app = getApplication<Application>()
-            _statusText.postValue(
-                if (reason == "cancelled") app.getString(R.string.status_cancelled)
-                else app.getString(R.string.status_error, reason)
-            )
-        }
-    }
-
     private fun reloadMessages() {
         if (conversationId == -1) return
         _messages.postValue(store.getConversationMessages(conversationId))
+    }
+
+    private class ServiceCallback(viewModel: ChatViewModel) : ILlmCallback.Stub() {
+        private val viewModelRef = WeakReference(viewModel)
+
+        override fun onWaiting(requestId: String, queuePosition: Int) {
+            viewModelRef.get()?.let { viewModel ->
+                viewModel._statusText.postValue(
+                    viewModel.getApplication<Application>().getString(
+                        R.string.status_waiting,
+                        queuePosition
+                    )
+                )
+            }
+        }
+
+        override fun onProcessing(requestId: String, partialText: String) {
+            viewModelRef.get()?.let { viewModel ->
+                viewModel.reloadMessages()
+                viewModel._statusText.postValue(
+                    viewModel.getApplication<Application>().getString(R.string.status_processing)
+                )
+            }
+        }
+
+        override fun onCompleted(requestId: String, fullText: String) {
+            viewModelRef.get()?.let { viewModel ->
+                viewModel.reloadMessages()
+                viewModel._statusText.postValue(
+                    viewModel.getApplication<Application>().getString(R.string.status_completed)
+                )
+            }
+        }
+
+        override fun onError(requestId: String, reason: String) {
+            viewModelRef.get()?.let { viewModel ->
+                viewModel.reloadMessages()
+                val app = viewModel.getApplication<Application>()
+                viewModel._statusText.postValue(
+                    if (reason == "cancelled") app.getString(R.string.status_cancelled)
+                    else app.getString(R.string.status_error, reason)
+                )
+            }
+        }
     }
 
     override fun onCleared() {

@@ -16,6 +16,7 @@ class ConversationStore(context: Context) {
         private const val PREFS_NAME = "conversation_store"
         private const val KEY_CONVERSATIONS = "conversations"
         private const val KEY_ID = "id"
+        private const val KEY_MAX_ID = "maxConversationId"
         private const val KEY_TITLE = "title"
         private const val KEY_UPDATED_AT = "updatedAt"
         private const val KEY_MESSAGES = "messages"
@@ -24,6 +25,7 @@ class ConversationStore(context: Context) {
         private const val KEY_TEXT = "text"
         private const val KEY_IS_USER = "isUser"
         private const val KEY_IS_STREAMING = "isStreaming"
+        // Keep titles short enough to fit on one line in the conversation list card.
         private const val TITLE_MAX_LENGTH = 24
     }
 
@@ -62,6 +64,7 @@ class ConversationStore(context: Context) {
                 .put(KEY_MESSAGES, JSONArray())
         )
         saveConversations(conversations)
+        prefs.edit().putInt(KEY_MAX_ID, maxOf(getMaxConversationId(), conversationId)).apply()
     }
 
     @Synchronized
@@ -148,6 +151,8 @@ class ConversationStore(context: Context) {
             }
         }.sortedByDescending { it.updatedAt }
     }
+
+    fun getMaxConversationId(): Int = prefs.getInt(KEY_MAX_ID, 0)
 
     fun getConversationMessages(conversationId: Int): List<ChatMessage> {
         val conversations = loadConversations()

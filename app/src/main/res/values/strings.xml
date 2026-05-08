@@ -29,4 +29,5 @@
     <string name="conversation_delete">삭제</string>
     <string name="conversation_delete_unavailable">서비스 연결 후 삭제할 수 있습니다</string>
     <string name="conversation_delete_failed">대화를 닫지 못했습니다</string>
+    <string name="conversation_delete_stale_removed">서비스에 없는 대화여서 목록에서만 제거했습니다</string>
 </resources>

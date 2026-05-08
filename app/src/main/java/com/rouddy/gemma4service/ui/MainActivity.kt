@@ -108,8 +108,12 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, R.string.conversation_delete_unavailable, Toast.LENGTH_SHORT)
                         .show()
                 } else {
-                    service.closeConversation(conversation.id)
+                    val closed = service.closeConversation(conversation.id)
                     conversationStore.removeConversation(conversation.id)
+                    if (!closed) {
+                        Toast.makeText(this, R.string.conversation_delete_stale_removed, Toast.LENGTH_SHORT)
+                            .show()
+                    }
                 }
                 conversationAdapter.closeDelete()
             }
