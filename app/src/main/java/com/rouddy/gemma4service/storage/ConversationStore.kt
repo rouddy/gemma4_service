@@ -2,6 +2,7 @@ package com.rouddy.gemma4service.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import com.rouddy.gemma4service.R
 import com.rouddy.gemma4service.ui.ChatMessage
 import org.json.JSONArray
@@ -10,15 +11,8 @@ import java.util.UUID
 
 class ConversationStore(context: Context) {
 
-    data class ConversationSummary(
-        val id: Int,
-        val title: String,
-        val preview: String,
-        val updatedAt: Long,
-        val messageCount: Int
-    )
-
     companion object {
+        private const val TAG = "ConversationStore"
         private const val PREFS_NAME = "conversation_store"
         private const val KEY_CONVERSATIONS = "conversations"
         private const val KEY_ID = "id"
@@ -32,6 +26,15 @@ class ConversationStore(context: Context) {
         private const val KEY_IS_STREAMING = "isStreaming"
         private const val TITLE_MAX_LENGTH = 24
     }
+
+
+    data class ConversationSummary(
+        val id: Int,
+        val title: String,
+        val preview: String,
+        val updatedAt: Long,
+        val messageCount: Int
+    )
 
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences =
@@ -98,6 +101,7 @@ class ConversationStore(context: Context) {
         val conversation = findConversation(conversations, conversationId) ?: return
         val messages = conversation.optJSONArray(KEY_MESSAGES) ?: return
         val message = findAssistantMessage(messages, requestId) ?: run {
+            Log.w(TAG, "Missing pending assistant message for requestId=$requestId conversationId=$conversationId")
             val fallback = JSONObject()
                 .put(KEY_MESSAGE_ID, UUID.randomUUID().toString())
                 .put(KEY_REQUEST_ID, requestId)

@@ -88,7 +88,6 @@ class ConversationListAdapter(
             }
             binding.foregroundView.setOnClickListener {
                 when {
-                    openedConversationId == item.id -> closeDelete()
                     openedConversationId != null -> closeDelete()
                     else -> onConversationClick(item)
                 }
